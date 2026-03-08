@@ -72,7 +72,8 @@ export async function getBranchQRCodes(tenantId: string) {
   const { data, error } = await supabase
     .from("branch_qr_codes")
     .select("*, branches(name, name_ar)")
-    .eq("tenant_id", tenantId);
+    .eq("tenant_id", tenantId)
+    .eq("is_active", true);
   if (error) throw new Error(error.message);
   return data;
 }

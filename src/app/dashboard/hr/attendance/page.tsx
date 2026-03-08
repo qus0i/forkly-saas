@@ -72,7 +72,8 @@ export default function AttendancePage() {
     setGeneratingQR(branchId);
     try {
       await generateBranchQR(tenantId, branchId);
-      load();
+      // IMPORTANT: await load so the new QR data is in state before user interacts
+      await load();
     } catch (err) { console.error(err); }
     finally { setGeneratingQR(null); }
   };
