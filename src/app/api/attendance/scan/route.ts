@@ -4,10 +4,14 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-  const { token } = await request.json();
+  const { token, action } = await request.json();
 
   if (!token) {
     return NextResponse.json({ error: "Missing QR token" }, { status: 400 });
+  }
+
+  if (!action || !["check_in", "check_out"].includes(action)) {
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
   const cookieStore = await cookies();
@@ -39,10 +43,10 @@ export async function POST(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Get employee profile — include is_active and tenant_id
+  // Get employee profile
   const { data: profile } = await db
     .from("profiles")
-    .select("id, tenant_id, is_active, full_name")
+    .select("id, tenant_id, is_active, full_name, full_name_ar")
     .eq("id", user.id)
     .single();
 
@@ -65,7 +69,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid or expired QR code" }, { status: 400 });
   }
 
-  // ✅ TENANT ISOLATION: employee must belong to the same tenant as the QR code
+  // TENANT ISOLATION: employee must belong to the same tenant as the QR code
   if (profile.tenant_id !== qr.tenant_id) {
     return NextResponse.json(
       { error: "Access denied: this QR code belongs to a different organization" },
@@ -73,34 +77,69 @@ export async function POST(request: Request) {
     );
   }
 
-  // Check for open attendance log (already checked in)
-  const { data: openLog } = await db
-    .from("attendance_logs")
-    .select("id")
-    .eq("employee_id", user.id)
-    .is("check_out", null)
-    .maybeSingle();
+  // Get branch name for display
+  const { data: branch } = await db
+    .from("branches")
+    .select("name, name_ar")
+    .eq("id", qr.branch_id)
+    .single();
 
-  if (openLog) {
-    // Check out
-    const { error } = await db
+  const branchName = branch?.name_ar || branch?.name || "";
+
+  if (action === "check_in") {
+    // Check if already checked in
+    const { data: openLog } = await db
       .from("attendance_logs")
-      .update({ check_out: new Date().toISOString() })
-      .eq("id", openLog.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ action: "check_out", name: profile.full_name });
-  }
+      .select("id")
+      .eq("employee_id", user.id)
+      .is("check_out", null)
+      .maybeSingle();
 
-  // Check in
-  const { error } = await db
-    .from("attendance_logs")
-    .insert({
+    if (openLog) {
+      return NextResponse.json({ error: "You are already checked in" }, { status: 400 });
+    }
+
+    // Check in
+    const { error } = await db.from("attendance_logs").insert({
       tenant_id: qr.tenant_id,
       employee_id: user.id,
       branch_id: qr.branch_id,
       check_in: new Date().toISOString(),
     });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ action: "check_in", name: profile.full_name });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({
+      action: "check_in",
+      name: profile.full_name_ar || profile.full_name,
+      branchName,
+    });
+  }
+
+  if (action === "check_out") {
+    // Find open log
+    const { data: openLog } = await db
+      .from("attendance_logs")
+      .select("id")
+      .eq("employee_id", user.id)
+      .is("check_out", null)
+      .maybeSingle();
+
+    if (!openLog) {
+      return NextResponse.json({ error: "You are not checked in" }, { status: 400 });
+    }
+
+    const { error } = await db
+      .from("attendance_logs")
+      .update({ check_out: new Date().toISOString() })
+      .eq("id", openLog.id);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({
+      action: "check_out",
+      name: profile.full_name_ar || profile.full_name,
+      branchName,
+    });
+  }
+
+  return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }

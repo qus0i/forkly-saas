@@ -1,118 +1,325 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
-import { LogIn, LogOut, XCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { LogIn, LogOut, Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
+
+type PageState = "login" | "loading" | "ready" | "success_in" | "success_out" | "error";
 
 function ScanContent() {
   const params = useSearchParams();
-  const router = useRouter();
   const token = params.get("token");
-  const [status, setStatus] = useState<"loading" | "success_in" | "success_out" | "error">("loading");
-  const [message, setMessage] = useState("");
-  const [employeeName, setEmployeeName] = useState("");
 
+  const [state, setState] = useState<PageState>("login");
+  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [employeeName, setEmployeeName] = useState("");
+  const [branchName, setBranchName] = useState("");
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionTime, setActionTime] = useState("");
+
+  // Check if user is already logged in
   useEffect(() => {
     if (!token) {
-      setStatus("error");
-      setMessage("Invalid QR code");
+      setState("error");
+      setError("رمز QR غير صالح / Invalid QR code");
       return;
     }
-
-    const processAttendance = async () => {
-      try {
-        const res = await fetch("/api/attendance/scan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ token }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          setStatus("error");
-          // Show Arabic-friendly messages
-          const msg = data.error || "An error occurred";
-          if (msg.includes("Not authenticated")) {
-            setMessage("يجب تسجيل الدخول أولاً / Please sign in first");
-          } else if (msg.includes("frozen")) {
-            setMessage("الحساب مجمّد. تواصل مع المدير / Account is frozen");
-          } else if (msg.includes("different organization")) {
-            setMessage("رمز QR لا ينتمي لمؤسستك / Wrong organization QR");
-          } else if (msg.includes("expired")) {
-            setMessage("رمز QR منتهي الصلاحية / Expired QR code");
-          } else {
-            setMessage(msg);
-          }
-          return;
-        }
-
-        setEmployeeName(data.name || "");
-        if (data.action === "check_in") {
-          setStatus("success_in");
-          setMessage("تم تسجيل الدخول بنجاح! / Checked in successfully!");
-        } else {
-          setStatus("success_out");
-          setMessage("تم تسجيل الخروج بنجاح! / Checked out successfully!");
-        }
-      } catch {
-        setStatus("error");
-        setMessage("حدث خطأ في الاتصال / Network error");
-      }
-    };
-
-    processAttendance();
+    // Try to check if already authenticated
+    checkAuth();
   }, [token]);
 
-  const icons = {
-    loading: <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />,
-    success_in: <LogIn className="h-12 w-12 text-green-600" />,
-    success_out: <LogOut className="h-12 w-12 text-blue-600" />,
-    error: <XCircle className="h-12 w-12 text-red-600" />,
+  const checkAuth = async () => {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const data = await res.json();
+      if (data.user && data.user.is_active) {
+        setEmployeeName(data.user.full_name_ar || data.user.full_name);
+        // Check attendance status
+        await checkAttendanceStatus();
+        setState("ready");
+      } else {
+        setState("login");
+      }
+    } catch {
+      setState("login");
+    }
   };
 
-  const bgColors = {
-    loading: "bg-muted/30",
-    success_in: "bg-green-50 dark:bg-green-950/20",
-    success_out: "bg-blue-50 dark:bg-blue-950/20",
-    error: "bg-red-50 dark:bg-red-950/20",
+  const checkAttendanceStatus = async () => {
+    try {
+      const res = await fetch("/api/attendance/status", { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok) {
+        setIsCheckedIn(data.isCheckedIn);
+        if (data.branchName) setBranchName(data.branchName);
+      }
+    } catch {
+      // ignore
+    }
   };
 
-  return (
-    <Card className="w-full max-w-sm animate-fade-in">
-      <CardContent className="p-8 text-center space-y-4">
-        <div className={`w-20 h-20 rounded-full ${bgColors[status]} flex items-center justify-center mx-auto`}>
-          {icons[status]}
-        </div>
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setError("");
 
-        {employeeName && (
-          <p className="text-sm font-medium text-muted-foreground">{employeeName}</p>
-        )}
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
 
-        <h1 className="text-xl font-bold">
-          {status === "loading"
-            ? "جارٍ المعالجة... / Processing..."
-            : status === "success_in"
-            ? "✓ تم تسجيل الدخول / Checked In"
-            : status === "success_out"
-            ? "✓ تم تسجيل الخروج / Checked Out"
-            : "خطأ / Error"}
-        </h1>
-        <p className="text-muted-foreground text-sm leading-relaxed">{message}</p>
+      if (!res.ok) {
+        if (data.error?.includes("frozen")) {
+          setError("الحساب مجمّد. تواصل مع المدير");
+        } else if (data.error?.includes("Invalid")) {
+          setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+        } else {
+          setError(data.error || "حدث خطأ");
+        }
+        return;
+      }
 
-        {(status === "success_in" || status === "success_out") && (
-          <p className="text-xs text-muted-foreground">
-            {new Date().toLocaleTimeString("ar-JO")}
+      // Successfully logged in — now check auth and load attendance status
+      await checkAuth();
+    } catch {
+      setError("خطأ في الاتصال بالخادم");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleAttendance = async (action: "check_in" | "check_out") => {
+    if (!token) return;
+    setActionLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/attendance/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ token, action }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.error?.includes("different organization")) {
+          setError("رمز QR لا ينتمي لمؤسستك");
+        } else if (data.error?.includes("frozen")) {
+          setError("الحساب مجمّد");
+        } else if (data.error?.includes("expired")) {
+          setError("رمز QR منتهي الصلاحية");
+        } else if (data.error?.includes("already checked in")) {
+          setError("أنت مسجّل دخول مسبقاً");
+        } else if (data.error?.includes("not checked in")) {
+          setError("لم تسجّل دخول بعد");
+        } else {
+          setError(data.error || "حدث خطأ");
+        }
+        return;
+      }
+
+      setActionTime(new Date().toLocaleTimeString("ar-JO", { hour: "2-digit", minute: "2-digit" }));
+      if (data.branchName) setBranchName(data.branchName);
+
+      if (action === "check_in") {
+        setState("success_in");
+        setIsCheckedIn(true);
+      } else {
+        setState("success_out");
+        setIsCheckedIn(false);
+      }
+    } catch {
+      setError("خطأ في الاتصال بالخادم");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ═══════════════ ERROR STATE ═══════════════
+  if (state === "error" && !token) {
+    return (
+      <Card className="w-full max-w-sm animate-fade-in">
+        <CardContent className="p-8 text-center space-y-4">
+          <div className="w-20 h-20 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto">
+            <XCircle className="h-12 w-12 text-red-500" />
+          </div>
+          <h1 className="text-xl font-bold">خطأ / Error</h1>
+          <p className="text-muted-foreground text-sm">{error}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ═══════════════ LOGIN FORM ═══════════════
+  if (state === "login") {
+    return (
+      <Card className="w-full max-w-sm animate-fade-in">
+        <CardContent className="p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+              <Clock className="h-8 w-8 text-primary" />
+            </div>
+            <h1 className="text-xl font-bold">تسجيل الحضور</h1>
+            <p className="text-sm text-muted-foreground">سجّل دخولك للمتابعة</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">البريد الإلكتروني</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="email@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                dir="ltr"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">كلمة المرور</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                dir="ltr"
+              />
+            </div>
+
+            {error && (
+              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/20 text-red-600 text-sm text-center">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" isLoading={loginLoading}>
+              <LogIn className="h-4 w-4 mr-2" />
+              تسجيل الدخول
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ═══════════════ READY — CHECK-IN / CHECK-OUT ═══════════════
+  if (state === "ready") {
+    return (
+      <Card className="w-full max-w-sm animate-fade-in">
+        <CardContent className="p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+              <Clock className="h-8 w-8 text-primary" />
+            </div>
+            <h1 className="text-xl font-bold">مرحباً {employeeName}</h1>
+            <p className="text-sm text-muted-foreground">
+              {isCheckedIn ? "أنت مسجّل دخول حالياً ✓" : "اختر العملية المطلوبة"}
+            </p>
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/20 text-red-600 text-sm text-center">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {/* CHECK IN */}
+            <Button
+              className="w-full h-14 text-lg bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => handleAttendance("check_in")}
+              disabled={actionLoading || isCheckedIn}
+            >
+              {actionLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              ) : (
+                <LogIn className="h-5 w-5 mr-2" />
+              )}
+              تسجيل الدخول
+            </Button>
+
+            {/* CHECK OUT */}
+            <Button
+              className="w-full h-14 text-lg bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => handleAttendance("check_out")}
+              disabled={actionLoading || !isCheckedIn}
+            >
+              {actionLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              ) : (
+                <LogOut className="h-5 w-5 mr-2" />
+              )}
+              تسجيل الخروج
+            </Button>
+          </div>
+
+          <p className="text-xs text-center text-muted-foreground">
+            {new Date().toLocaleDateString("ar-JO", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
 
-        {status === "error" && message.includes("sign in") && (
-          <Button onClick={() => router.push("/login")} className="w-full mt-2">
-            تسجيل الدخول / Login
-          </Button>
-        )}
+  // ═══════════════ SUCCESS IN / OUT ═══════════════
+  if (state === "success_in" || state === "success_out") {
+    const isIn = state === "success_in";
+    return (
+      <Card className="w-full max-w-sm animate-fade-in">
+        <CardContent className="p-8 text-center space-y-4">
+          <div className={`w-20 h-20 rounded-full ${isIn ? "bg-green-50 dark:bg-green-950/20" : "bg-blue-50 dark:bg-blue-950/20"} flex items-center justify-center mx-auto`}>
+            <CheckCircle2 className={`h-12 w-12 ${isIn ? "text-green-600" : "text-blue-600"}`} />
+          </div>
+
+          <h1 className="text-xl font-bold">
+            {isIn ? "✓ تم تسجيل الدخول" : "✓ تم تسجيل الخروج"}
+          </h1>
+
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{employeeName}</p>
+            {branchName && <p className="text-xs text-muted-foreground">الفرع: {branchName}</p>}
+            <p className="text-lg font-mono font-bold text-primary">{actionTime}</p>
+          </div>
+
+          <div className="pt-4 space-y-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setState("ready");
+                setError("");
+                checkAttendanceStatus();
+              }}
+            >
+              رجوع
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ═══════════════ LOADING ═══════════════
+  return (
+    <Card className="w-full max-w-sm">
+      <CardContent className="p-8 text-center">
+        <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mx-auto" />
+        <p className="mt-4 text-muted-foreground">جارٍ التحميل...</p>
       </CardContent>
     </Card>
   );
@@ -120,12 +327,12 @@ function ScanContent() {
 
 export default function AttendanceScanPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-background to-muted/30">
       <Suspense fallback={
         <Card className="w-full max-w-sm">
           <CardContent className="p-8 text-center">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mx-auto" />
-            <p className="mt-4 text-muted-foreground">جارٍ التحميل... / Loading...</p>
+            <p className="mt-4 text-muted-foreground">جارٍ التحميل...</p>
           </CardContent>
         </Card>
       }>
