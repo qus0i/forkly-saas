@@ -26,6 +26,7 @@ function ScanContent() {
         const res = await fetch("/api/attendance/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({ token }),
         });
         const data = await res.json();

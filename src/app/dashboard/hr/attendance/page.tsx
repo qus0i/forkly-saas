@@ -168,7 +168,12 @@ export default function AttendancePage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground mb-4">{isRTL ? showQR?.branches?.name_ar || showQR?.branches?.name : showQR?.branches?.name}</p>
           <div className="flex justify-center p-6 bg-white rounded-xl">
-            {showQR && <QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/attendance/scan?token=${showQR.qr_token}`} size={200} />}
+            {showQR && (
+              <QRCodeSVG 
+                value={`${typeof window !== "undefined" ? window.location.protocol + "//" + window.location.host : ""}/attendance/scan?token=${showQR.qr_token}`} 
+                size={200} 
+              />
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-2">{isRTL ? "امسح الرمز لتسجيل الدخول/الخروج" : "Scan to check in/out"}</p>
           <Button variant="outline" className="mt-2" onClick={() => window.print()}>
