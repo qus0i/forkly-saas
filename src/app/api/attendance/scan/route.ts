@@ -58,18 +58,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Account is frozen" }, { status: 403 });
   }
 
-  // Validate QR token — must be active
-  const { data: qr } = await db
+  // Validate QR token — use maybeSingle to avoid single() errors
+  const { data: qr, error: qrError } = await db
     .from("branch_qr_codes")
     .select("id, branch_id, tenant_id, is_active")
     .eq("qr_token", token)
-    .single();
+    .maybeSingle();
 
-  if (!qr || !qr.is_active) {
-    return NextResponse.json({ error: "Invalid or expired QR code" }, { status: 400 });
+  if (qrError) {
+    console.error("[QR Scan] DB error looking up token:", qrError.message, "Token:", token);
+    return NextResponse.json({ error: `Database error: ${qrError.message}` }, { status: 500 });
   }
 
-  // TENANT ISOLATION: employee must belong to the same tenant as the QR code
+  if (!qr) {
+    console.error("[QR Scan] Token not found in DB. Token:", token);
+    return NextResponse.json({ error: `QR token not found. Token prefix: ${token.substring(0, 20)}...` }, { status: 400 });
+  }
+
+  if (!qr.is_active) {
+    console.error("[QR Scan] Token found but is_active=false. Token:", token);
+    return NextResponse.json({ error: "QR code is deactivated (is_active=false)" }, { status: 400 });
+  }
+
+  // TENANT ISOLATION
   if (profile.tenant_id !== qr.tenant_id) {
     return NextResponse.json(
       { error: "Access denied: this QR code belongs to a different organization" },
@@ -87,7 +98,6 @@ export async function POST(request: Request) {
   const branchName = branch?.name_ar || branch?.name || "";
 
   if (action === "check_in") {
-    // Check if already checked in
     const { data: openLog } = await db
       .from("attendance_logs")
       .select("id")
@@ -99,7 +109,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You are already checked in" }, { status: 400 });
     }
 
-    // Check in
     const { error } = await db.from("attendance_logs").insert({
       tenant_id: qr.tenant_id,
       employee_id: user.id,
@@ -116,7 +125,6 @@ export async function POST(request: Request) {
   }
 
   if (action === "check_out") {
-    // Find open log
     const { data: openLog } = await db
       .from("attendance_logs")
       .select("id")

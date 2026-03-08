@@ -113,22 +113,11 @@ function ScanContent() {
       });
       const data = await res.json();
 
-      if (!res.ok) {
-        if (data.error?.includes("different organization")) {
-          setError("رمز QR لا ينتمي لمؤسستك");
-        } else if (data.error?.includes("frozen")) {
-          setError("الحساب مجمّد");
-        } else if (data.error?.includes("expired")) {
-          setError("رمز QR منتهي الصلاحية");
-        } else if (data.error?.includes("already checked in")) {
-          setError("أنت مسجّل دخول مسبقاً");
-        } else if (data.error?.includes("not checked in")) {
-          setError("لم تسجّل دخول بعد");
-        } else {
-          setError(data.error || "حدث خطأ");
+        if (!res.ok) {
+          // Show raw error for debugging (stay on ready page)
+          setError(data.error || "An error occurred");
+          return;
         }
-        return;
-      }
 
       setActionTime(new Date().toLocaleTimeString("ar-JO", { hour: "2-digit", minute: "2-digit" }));
       if (data.branchName) setBranchName(data.branchName);
